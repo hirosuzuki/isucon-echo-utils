@@ -9,11 +9,6 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-// Usage:
-//  import ieu "github.com/hirosuzuki/isucon-echo-utils"
-//  e.GET("/_/routes", ieu.ShowRoutes)
-//  e.GET("/_/kataribe", ieu.ShowKataribe)
-
 func getAfter(s string, sep string) string {
 	vs := strings.Split(s, sep)
 	return vs[len(vs)-1]

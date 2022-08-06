@@ -15,14 +15,8 @@ import (
 	"github.com/valyala/fasttemplate"
 )
 
-// Usage:
-//  import ieu "github.com/hirosuzuki/isucon-echo-utils"
-// 	e.Use(ieu.Logger())
-// 	e.Use(ieu.Logger())
-// 	e.Use(ieu.Logger())
-
 const (
-	LOG_FORMAT = `${remote_ip} ${uid} - [${time_apache}] "${method} ${uri} ${protocol}" ${status} ${bytes_out} "${referer}" "${user_agent}" ${latency_sec}`
+	LOG_FORMAT = `${remote_ip} ${id} ${uid} [${time_apache}] "${method} ${uri} ${protocol}" ${status} ${bytes_out} "${referer}" "${user_agent}" ${latency_sec}`
 	// Tags to construct the logger format.
 	//
 	// - time_unix
@@ -107,6 +101,9 @@ func Logger() echo.MiddlewareFunc {
 					id := req.Header.Get(echo.HeaderXRequestID)
 					if id == "" {
 						id = res.Header().Get(echo.HeaderXRequestID)
+					}
+					if id == "" {
+						id = "-"
 					}
 					return buf.WriteString(id)
 				case "uid":
