@@ -1,102 +1,68 @@
-package middleware
+package isuconechoutils
 
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/labstack/echo/v4"
-	"github.com/labstack/gommon/color"
 	"github.com/valyala/fasttemplate"
 )
 
-type (
-	// LoggerConfig defines the config for Logger middleware.
-	LoggerConfig struct {
-		// Skipper defines a function to skip middleware.
+// Usage:
+//  import ieu "github.com/hirosuzuki/isucon-echo-utils"
+// 	e.Use(ieu.Logger())
+// 	e.Use(ieu.Logger())
+// 	e.Use(ieu.Logger())
 
-		// Tags to construct the logger format.
-		//
-		// - time_unix
-		// - time_unix_milli
-		// - time_unix_micro
-		// - time_unix_nano
-		// - time_rfc3339
-		// - time_rfc3339_nano
-		// - time_custom
-		// - id (Request ID)
-		// - remote_ip
-		// - uri
-		// - host
-		// - method
-		// - path
-		// - protocol
-		// - referer
-		// - user_agent
-		// - status
-		// - error
-		// - latency (In nanoseconds)
-		// - latency_human (Human readable)
-		// - bytes_in (Bytes received)
-		// - bytes_out (Bytes sent)
-		// - header:<NAME>
-		// - query:<NAME>
-		// - form:<NAME>
-		//
-		// Example "${remote_ip} ${status}"
-		//
-		// Optional. Default value DefaultLoggerConfig.Format.
-		Format string `yaml:"format"`
-
-		// Optional. Default value DefaultLoggerConfig.CustomTimeFormat.
-		CustomTimeFormat string `yaml:"custom_time_format"`
-
-		// Output is a writer where logs in JSON format are written.
-		// Optional. Default value os.Stdout.
-		Output io.Writer
-
-		template *fasttemplate.Template
-		colorer  *color.Color
-		pool     *sync.Pool
-	}
+const (
+	LOG_FORMAT = `${remote_ip} ${uid} - [${time_apache}] "${method} ${uri} ${protocol}" ${status} ${bytes_out} "${referer}" "${user_agent}" ${latency_sec}`
+	// Tags to construct the logger format.
+	//
+	// - time_unix
+	// - time_unix_milli
+	// - time_unix_micro
+	// - time_unix_nano
+	// - time_rfc3339
+	// - time_rfc3339_nano
+	// - time_apache
+	// - id (Request ID / X-Request-ID Header)
+	// - uid (Unique ID / X-Unique-ID Response Header)
+	// - remote_ip
+	// - uri
+	// - host
+	// - method
+	// - path
+	// - protocol
+	// - referer
+	// - user_agent
+	// - status
+	// - error
+	// - latency (In nanoseconds)
+	// - latency_sec (In seconds)
+	// - latency_msec (In miniseconds)
+	// - latency_human (Human readable)
+	// - bytes_in (Bytes received)
+	// - bytes_out (Bytes sent)
+	// - header:<NAME>
+	// - query:<NAME>
+	// - form:<NAME>
 )
 
-var (
-	// DefaultLoggerConfig is the default Logger middleware config.
-	DefaultLoggerConfig = LoggerConfig{
-		Format: `{"time":"${time_rfc3339_nano}","id":"${id}","remote_ip":"${remote_ip}",` +
-			`"host":"${host}","method":"${method}","uri":"${uri}","user_agent":"${user_agent}",` +
-			`"status":${status},"error":"${error}","latency":${latency},"latency_human":"${latency_human}"` +
-			`,"bytes_in":${bytes_in},"bytes_out":${bytes_out}}` + "\n",
-		CustomTimeFormat: "2006-01-02 15:04:05.00000",
-		colorer:          color.New(),
-	}
-)
-
-// Logger returns a middleware that logs HTTP requests.
 func Logger() echo.MiddlewareFunc {
-	return LoggerWithConfig(DefaultLoggerConfig)
-}
-
-// LoggerWithConfig returns a Logger middleware with config.
-// See: `Logger()`.
-func LoggerWithConfig(config LoggerConfig) echo.MiddlewareFunc {
-	// Defaults
-	if config.Format == "" {
-		config.Format = DefaultLoggerConfig.Format
+	logfile := os.Getenv("APPLOG")
+	if logfile == "" {
+		logfile = "/tmp/app.log"
 	}
-	if config.Output == nil {
-		config.Output = DefaultLoggerConfig.Output
-	}
-
-	config.template = fasttemplate.New(config.Format, "${", "}")
-	config.colorer = color.New()
-	config.colorer.SetOutput(config.Output)
-	config.pool = &sync.Pool{
+	output, _ := os.Create(logfile)
+	template := fasttemplate.New(LOG_FORMAT+"\n", "${", "}")
+	pool := &sync.Pool{
 		New: func() interface{} {
 			return bytes.NewBuffer(make([]byte, 256))
 		},
@@ -104,6 +70,9 @@ func LoggerWithConfig(config LoggerConfig) echo.MiddlewareFunc {
 
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) (err error) {
+			if output == nil {
+				return
+			}
 
 			req := c.Request()
 			res := c.Response()
@@ -112,11 +81,11 @@ func LoggerWithConfig(config LoggerConfig) echo.MiddlewareFunc {
 				c.Error(err)
 			}
 			stop := time.Now()
-			buf := config.pool.Get().(*bytes.Buffer)
+			buf := pool.Get().(*bytes.Buffer)
 			buf.Reset()
-			defer config.pool.Put(buf)
+			defer pool.Put(buf)
 
-			if _, err = config.template.ExecuteFunc(buf, func(w io.Writer, tag string) (int, error) {
+			if _, err = template.ExecuteFunc(buf, func(w io.Writer, tag string) (int, error) {
 				switch tag {
 				case "time_unix":
 					return buf.WriteString(strconv.FormatInt(time.Now().Unix(), 10))
@@ -132,12 +101,18 @@ func LoggerWithConfig(config LoggerConfig) echo.MiddlewareFunc {
 					return buf.WriteString(time.Now().Format(time.RFC3339))
 				case "time_rfc3339_nano":
 					return buf.WriteString(time.Now().Format(time.RFC3339Nano))
-				case "time_custom":
-					return buf.WriteString(time.Now().Format(config.CustomTimeFormat))
+				case "time_apache":
+					return buf.WriteString(time.Now().Format("02/Jan/2006:15:04:05 -0700"))
 				case "id":
 					id := req.Header.Get(echo.HeaderXRequestID)
 					if id == "" {
 						id = res.Header().Get(echo.HeaderXRequestID)
+					}
+					return buf.WriteString(id)
+				case "uid":
+					id := res.Header().Get("X-Unique-ID")
+					if id == "" {
+						id = "-"
 					}
 					return buf.WriteString(id)
 				case "remote_ip":
@@ -161,17 +136,7 @@ func LoggerWithConfig(config LoggerConfig) echo.MiddlewareFunc {
 				case "user_agent":
 					return buf.WriteString(req.UserAgent())
 				case "status":
-					n := res.Status
-					s := config.colorer.Green(n)
-					switch {
-					case n >= 500:
-						s = config.colorer.Red(n)
-					case n >= 400:
-						s = config.colorer.Yellow(n)
-					case n >= 300:
-						s = config.colorer.Cyan(n)
-					}
-					return buf.WriteString(s)
+					return buf.WriteString(strconv.Itoa(res.Status))
 				case "error":
 					if err != nil {
 						// Error may contain invalid JSON e.g. `"`
@@ -182,6 +147,12 @@ func LoggerWithConfig(config LoggerConfig) echo.MiddlewareFunc {
 				case "latency":
 					l := stop.Sub(start)
 					return buf.WriteString(strconv.FormatInt(int64(l), 10))
+				case "latency_sec":
+					l := stop.Sub(start)
+					return buf.WriteString(fmt.Sprintf("%.3f", float64(l)/1000000000))
+				case "latency_msec":
+					l := stop.Sub(start)
+					return buf.WriteString(fmt.Sprintf("%.3f", float64(l)/1000000))
 				case "latency_human":
 					return buf.WriteString(stop.Sub(start).String())
 				case "bytes_in":
@@ -211,12 +182,7 @@ func LoggerWithConfig(config LoggerConfig) echo.MiddlewareFunc {
 			}); err != nil {
 				return
 			}
-
-			if config.Output == nil {
-				_, err = c.Logger().Output().Write(buf.Bytes())
-				return
-			}
-			_, err = config.Output.Write(buf.Bytes())
+			_, err = output.Write(buf.Bytes())
 			return
 		}
 	}
